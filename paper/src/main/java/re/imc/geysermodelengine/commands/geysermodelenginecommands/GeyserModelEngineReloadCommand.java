@@ -1,6 +1,6 @@
 package re.imc.geysermodelengine.commands.geysermodelenginecommands;
 
-import dev.jorel.commandapi.CommandAPICommand;
+import org.bukkit.command.CommandSender;
 import org.bukkit.Bukkit;
 import re.imc.geysermodelengine.GeyserModelEngine;
 import re.imc.geysermodelengine.managers.commands.subcommands.SubCommands;
@@ -17,12 +17,14 @@ public class GeyserModelEngineReloadCommand implements SubCommands {
     }
 
     @Override
-    public CommandAPICommand onCommand() {
-        return new CommandAPICommand("reload")
-                .withPermission("geysermodelengine.commands.reload")
-                .executes((sender, args) -> {
-                    Bukkit.getAsyncScheduler().runNow(plugin, scheduledTask -> plugin.getConfigManager().load());
-                    sender.sendMessage(colourUtils.miniFormat(plugin.getConfigManager().getLang().getString("commands.reload.successfully-reloaded")));
-                });
+    public String getName() { return "reload"; }
+
+    @Override
+    public String getPermission() { return "geysermodelengine.commands.reload"; }
+
+    @Override
+    public void execute(CommandSender sender) {
+        Bukkit.getAsyncScheduler().runNow(plugin, scheduledTask -> plugin.getConfigManager().load());
+        sender.sendMessage(colourUtils.miniFormat(plugin.getConfigManager().getLang().getString("commands.reload.successfully-reloaded")));
     }
 }
