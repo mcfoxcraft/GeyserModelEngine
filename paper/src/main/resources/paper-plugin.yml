@@ -23,5 +23,7 @@ dependencies:
       required: false
     ModelEngine:
       required: false
+      load: BEFORE
     BetterModel:
       required: false
+      load: BEFORE

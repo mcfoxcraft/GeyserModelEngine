@@ -1,11 +1,9 @@
 package re.imc.geysermodelengine.managers.commands.subcommands;
 
-import dev.jorel.commandapi.CommandAPICommand;
+import org.bukkit.command.CommandSender;
 
 public interface SubCommands {
-
-    /**
-     * Subcommand setup
-     */
-    CommandAPICommand onCommand();
+    String getName();
+    String getPermission();
+    void execute(CommandSender sender);
 }
