@@ -342,14 +342,8 @@ class BetterModelTaskHandlerTest {
         Runnable spawn = scheduled.get(scheduled.size() - 1);
         AtomicReference<Thread> spawner = new AtomicReference<>();
         doAnswer(call -> {
-            // The sync delay elapses on a pool thread while the task is in checkViewers.
-            Thread thread = new Thread(spawn);
-            spawner.set(thread);
-            thread.start();
-            long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-            while (thread.getState() != Thread.State.BLOCKED && thread.isAlive() && System.nanoTime() < until) {
-                Thread.onSpinWait();
-            }
+            // The sync delay elapses while the task is in checkViewers.
+            spawner.set(spawnOnAnotherThread(spawn));
             // What checkViewers does for a player who went out of range.
             copy.sendEntityDestroyPacket(List.of(player));
             viewers.remove(player);
@@ -360,6 +354,67 @@ class BetterModelTaskHandlerTest {
         spawner.get().join(2000);
 
         verify(copy, never()).sendSpawnPacket(any());
+    }
+
+    @Test
+    void aSpawnWaitsWhileTheCopyGoes() throws InterruptedException {
+        // The tracker closed: the spawn must not go out between the copy's check and its destroy packet.
+        joiningViewer();
+        Runnable spawn = scheduled.get(scheduled.size() - 1);
+        AtomicReference<Thread> spawner = new AtomicReference<>();
+        AtomicBoolean gone = new AtomicBoolean();
+        when(copy.isDead()).thenAnswer(call -> gone.get());
+        doAnswer(call -> {
+            // The sync delay elapses while the copy goes.
+            spawner.set(spawnOnAnotherThread(spawn));
+            // What PacketEntity#remove does: marks itself removed, then sends the viewers the destroy packet.
+            gone.set(true);
+            copy.sendEntityDestroyPacket(viewers);
+            return null;
+        }).when(copy).remove();
+        when(tracker.isClosed()).thenReturn(true);
+
+        handler.runAsync();
+        spawner.get().join(2000);
+
+        verify(copy).remove();
+        verify(copy, never()).sendSpawnPacket(any());
+    }
+
+    @Test
+    void aSpawnWaitsWhileTheDyingCopyLetsAViewerGo() throws InterruptedException {
+        // The mob died and the player went out of sight: the spawn must not go out between the destroy packet the
+        // dying copy sends them and their leaving the viewers.
+        Player player = joiningViewer();
+        Runnable spawn = scheduled.get(scheduled.size() - 1);
+        AtomicReference<Thread> spawner = new AtomicReference<>();
+        when(taskManager.canSee(player, copy, tracker)).thenReturn(false);
+        when(mob.dead()).thenReturn(true);
+        doAnswer(call -> {
+            // The sync delay elapses while the destroy packet goes out.
+            spawner.set(spawnOnAnotherThread(spawn));
+            return null;
+        }).when(copy).sendEntityDestroyPacket(List.of(player));
+
+        handler.runAsync();
+        spawner.get().join(2000);
+
+        verify(copy).sendEntityDestroyPacket(List.of(player));
+        verify(copy, never()).sendSpawnPacket(any());
+    }
+
+    /**
+     * Runs the waiting spawn on another thread, as the pool does when its delay elapses, and returns once that
+     * thread waits for the copy's lock (or has run, when nothing holds it).
+     */
+    private static Thread spawnOnAnotherThread(Runnable spawn) {
+        Thread thread = new Thread(spawn);
+        thread.start();
+        long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (thread.getState() != Thread.State.BLOCKED && thread.isAlive() && System.nanoTime() < until) {
+            Thread.onSpinWait();
+        }
+        return thread;
     }
 
     /** A Bedrock player comes into range: checkViewers adds them and asks for the copy's spawn. */
