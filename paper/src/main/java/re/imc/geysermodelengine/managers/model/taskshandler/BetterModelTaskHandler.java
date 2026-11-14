@@ -39,6 +39,13 @@ public class BetterModelTaskHandler implements TaskHandler {
     private boolean removed = false;
     private final TrackerLifetime lifetime = new TrackerLifetime();
 
+    /**
+     * Held while players join or leave the copy's viewers, while the copy goes, and while a spawn that waited for the
+     * custom entity sync goes out: a spawn then never reaches a player after the destroy packet that took the copy
+     * away from them, which no later packet would undo.
+     */
+    private final Object viewerLock = new Object();
+
     private final ConcurrentHashMap<String, Integer> lastIntSet = new ConcurrentHashMap<>();
     private final Cache<String, Boolean> lastPlayedAnim = CacheBuilder.newBuilder().expireAfterWrite(30, TimeUnit.MILLISECONDS).build();
 
@@ -75,17 +82,14 @@ public class BetterModelTaskHandler implements TaskHandler {
             return;
         }
 
-        if (stage == TrackerLifetime.Stage.DYING) {
-            dropViewersWhoCannotSee(viewers);
-        } else {
-            plugin.getEntityTaskManager().checkViewers(entityData, viewers);
+        synchronized (viewerLock) {
+            if (stage == TrackerLifetime.Stage.LIVING) plugin.getEntityTaskManager().checkViewers(entityData, viewers);
+            // checkViewers walks the online players only: every 40 runs a living copy also lets go of viewers who left
+            // the server, and tells any other viewer it no longer reaches.
+            if (stage == TrackerLifetime.Stage.DYING || tick % 40 == 0) dropViewersWhoCannotSee(viewers);
         }
 
         entityData.teleportToModel();
-
-        if (tick % 40 == 0) {
-            viewers.removeIf(viewer -> !plugin.getEntityTaskManager().canSee(viewer, entityData.getEntity(), entityData.getModelInstance()));
-        }
 
         tick++;
         if (tick > 400) {
@@ -101,7 +105,8 @@ public class BetterModelTaskHandler implements TaskHandler {
 
     /**
      * While the mob dies its copy is shown to nobody new (BetterModel no longer draws it for players who come near
-     * once the mob is gone): it stays for the players who see it, until they no longer can.
+     * once the mob is gone): it stays for the players who see it, until they no longer can. A player is let go with
+     * a destroy packet, so the copy does not stay on their screen. Call with {@link #viewerLock} held.
      */
     private void dropViewersWhoCannotSee(Set<Player> viewers) {
         PacketEntity entity = entityData.getEntity();
@@ -114,12 +119,15 @@ public class BetterModelTaskHandler implements TaskHandler {
 
     /**
      * Takes the copy away from the players it is drawn for and out of the caches, and stops this task. Only this
-     * tracker's entry goes: a mob can carry other models, and a tracker that replaces this one (BetterModel closes a
-     * tracker when a new one of the same model is made for the mob, on a reload for one) is already in.
+     * tracker's entry goes: a mob can carry other models, and a tracker that replaces this one keeps its own entry
+     * (BetterModel makes it just before it closes this one when the model is made again for the mob, and just after
+     * on a reload).
      */
     private void remove() {
-        removed = true;
-        entityData.getEntity().remove();
+        synchronized (viewerLock) {
+            removed = true;
+            entityData.getEntity().remove();
+        }
 
         int id = entityData.getEntitySource().id();
         plugin.getModelManager().getEntitiesCache().computeIfPresent(id, (key, models) -> {
@@ -146,9 +154,15 @@ public class BetterModelTaskHandler implements TaskHandler {
         if (plugin.getConfigManager().getConfig().getBoolean("options.debug.send-data")) plugin.getLogger().info("Setting custom entity data for " + betterModelEntityData.getEntityTracker().name());
 
         CustomEntitySpawnSynchronizer.sendAndSpawn(plugin, player, entityData.getEntity().getEntityId(), customIdentifier, delay, () -> {
-            entityData.getEntity().sendSpawnPacket(Collections.singletonList(player));
+            // The spawn waited for the custom entity sync: meanwhile the copy may have gone, or let go of the player.
+            synchronized (viewerLock) {
+                if (!isDrawnFor(entityData, player)) return;
+                entityData.getEntity().sendSpawnPacket(Collections.singletonList(player));
+            }
 
             plugin.getSchedulerPool().schedule(() -> {
+                if (!isDrawnFor(entityData, player)) return;
+
                 plugin.getEntityTaskManager().getPropertyHandler().sendHitBox(entityData, player);
 
                 plugin.getEntityTaskManager().getPropertyHandler().sendScale(entityData, Collections.singleton(player), lastScale, true);
@@ -157,6 +171,10 @@ public class BetterModelTaskHandler implements TaskHandler {
                 plugin.getEntityTaskManager().getPropertyHandler().updateEntityProperties(entityData, Collections.singleton(player), true);
             }, propertiesSendDelay, TimeUnit.MILLISECONDS);
         });
+    }
+
+    private static boolean isDrawnFor(EntityData entityData, Player player) {
+        return !entityData.getEntity().isDead() && entityData.getViewers().contains(player);
     }
 
     @Override
