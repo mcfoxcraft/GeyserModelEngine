@@ -53,6 +53,11 @@ dependencies {
     implementation("org.bstats:bstats-bukkit:3.0.2")
 
     implementation("org.reflections:reflections:0.10.2")
+
+    testImplementation(platform("org.junit:junit-bom:5.12.2"))
+    testImplementation("org.junit.jupiter:junit-jupiter")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    testImplementation("org.mockito:mockito-core:5.17.0")
 }
 
 java {
@@ -90,4 +95,13 @@ tasks.processResources {
     filesMatching("paper-plugin.yml") {
         expand(props)
     }
+}
+
+// The tests run against the same server and model engine APIs the plugin is built against.
+configurations.testImplementation.configure {
+    extendsFrom(configurations.compileOnly.get())
+}
+
+tasks.test {
+    useJUnitPlatform()
 }

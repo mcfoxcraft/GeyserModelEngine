@@ -15,8 +15,8 @@ import re.imc.geysermodelengine.managers.model.entity.EntityData;
 import re.imc.geysermodelengine.managers.model.model.BetterModelModel;
 import re.imc.geysermodelengine.managers.model.model.Model;
 
-import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class BetterModelHandler implements ModelHandler {
 
@@ -33,21 +33,28 @@ public class BetterModelHandler implements ModelHandler {
 
         int entityID = entitySource.id();
 
+        Map<Model, EntityData> current = plugin.getModelManager().getEntitiesCache().get(entityID);
+        if (current != null) {
+            for (EntityData data : current.values()) {
+                if (data.getModelInstance() == entityTracker) return; // this tracker has its copy already
+            }
+        }
+
+        // A copy of the same model on this mob does not stop this one: BetterModel keeps one tracker per model on a
+        // mob and closes the one a new tracker replaces (right after this event when the model is made again, before
+        // it on a reload), and a copy goes once its tracker is closed.
         PropertyHandler propertyHandler = plugin.getEntityTaskManager().getPropertyHandler();
         EntityData entityData = new BetterModelEntityData(plugin, entitySource, entityTracker);
 
         Model model = new BetterModelModel(entityTracker, this, entityData, propertyHandler);
 
-        Map<Model, EntityData> entityDataCache = plugin.getModelManager().getEntitiesCache().computeIfAbsent(entityID, k -> new HashMap<>());
-
-        for (Map.Entry<Model, EntityData> entry : entityDataCache.entrySet()) {
-            if (entry.getKey() != model && entry.getKey().getName().equals(entityTracker.name())) {
-                return;
-            }
-        }
-
+        // Concurrent: the update task walks these maps while a copy that goes takes itself out of them.
+        plugin.getModelManager().getEntitiesCache().compute(entityID, (id, models) -> {
+            Map<Model, EntityData> map = models != null ? models : new ConcurrentHashMap<>();
+            map.put(model, entityData);
+            return map;
+        });
         plugin.getModelManager().getModelEntitiesCache().put(entityID, model);
-        entityDataCache.put(model, entityData);
 
         if (plugin.getConfigManager().getConfig().getBoolean("options.debug.spawn")) plugin.getLogger().info("Creating model for " + model.getName());
     }

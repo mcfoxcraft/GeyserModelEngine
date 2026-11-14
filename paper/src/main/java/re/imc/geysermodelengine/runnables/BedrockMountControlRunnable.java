@@ -24,6 +24,8 @@ public class BedrockMountControlRunnable implements Runnable {
     public void run() {
         for (UUID playerUUID : plugin.getModelManager().getPlayerJoinedCache()) {
             Player player = Bukkit.getPlayer(playerUUID);
+            // Left while this walk ran: a periodic task that throws is never run again.
+            if (player == null) continue;
 
             float pitch = player.getLocation().getPitch();
             Pair<ActiveModel, Mount> seat = plugin.getModelManager().getDriversCache().get(player.getUniqueId());

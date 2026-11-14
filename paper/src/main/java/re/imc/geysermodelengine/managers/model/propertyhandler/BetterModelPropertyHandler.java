@@ -1,6 +1,7 @@
 package re.imc.geysermodelengine.managers.model.propertyhandler;
 
 import kr.toxicity.model.api.animation.AnimationIterator;
+import kr.toxicity.model.api.animation.RunningAnimation;
 import kr.toxicity.model.api.bone.RenderedBone;
 import kr.toxicity.model.api.data.blueprint.BlueprintAnimation;
 import kr.toxicity.model.api.data.renderer.RenderPipeline;
@@ -79,12 +80,14 @@ public class BetterModelPropertyHandler implements PropertyHandler {
         RenderPipeline handler = model.getEntityTracker().getPipeline();
 
         for (RenderedBone renderedBone : handler.bones()) {
-            if (model.getEntityTracker().bone(renderedBone.name()).runningAnimation() != null) {
-                BlueprintAnimation anim = model.getEntityTracker().renderer().animations().get(renderedBone.runningAnimation().name());
-                anims.add(renderedBone.runningAnimation().name());
-                if (anim.override() && anim.loop() == AnimationIterator.Type.PLAY_ONCE) {
-                    break;
-                }
+            // Read once: BetterModel's tick thread clears a bone's running animation the moment it ends.
+            RunningAnimation running = renderedBone.runningAnimation();
+            if (running == null) continue;
+
+            anims.add(running.name());
+            BlueprintAnimation anim = model.getEntityTracker().renderer().animations().get(running.name());
+            if (anim != null && anim.override() && anim.loop() == AnimationIterator.Type.PLAY_ONCE) {
+                break;
             }
         }
 
