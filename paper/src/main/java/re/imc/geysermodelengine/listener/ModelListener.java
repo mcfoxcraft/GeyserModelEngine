@@ -38,7 +38,10 @@ public class ModelListener implements Listener {
     public void onPlayerJoin(PlayerJoinEvent event) {
         Player player = event.getPlayer();
         if (!BedrockUtils.isBedrockPlayer(player)) return;
-        Bukkit.getGlobalRegionScheduler().runDelayed(plugin, scheduledTask -> plugin.getModelManager().getPlayerJoinedCache().add(player.getUniqueId()), 20);
+        // Not for a player who left within that second: the quit has already taken them out, and nothing would again.
+        Bukkit.getGlobalRegionScheduler().runDelayed(plugin, scheduledTask -> {
+            if (player.isOnline()) plugin.getModelManager().getPlayerJoinedCache().add(player.getUniqueId());
+        }, 20);
     }
 
     @EventHandler
